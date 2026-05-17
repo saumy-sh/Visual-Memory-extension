@@ -4,6 +4,7 @@
   "version": "0.1.0",
   "description": "Capture sections of webpages as floating screenshots.",
   "permissions": ["activeTab", "storage", "scripting", "tabs"],
+  "host_permissions": ["<all_urls>"],
   "action": {
     "default_popup": "popup/index.html",
     "default_icon": {
@@ -21,6 +22,12 @@
       "matches": ["<all_urls>"],
       "js": ["content/index.js"],
       "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["content/index.js", "assets/*"],
+      "matches": ["<all_urls>"]
     }
   ],
   "icons": {

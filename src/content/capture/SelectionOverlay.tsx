@@ -81,7 +81,7 @@ export function SelectionOverlay() {
         image,
         pageUrl: window.location.href,
         createdAt: Date.now(),
-        capturePosition: { scrollX: window.scrollX, scrollY: window.scrollY + rect.y },
+        capturePosition: { scrollX: window.scrollX, scrollY: window.scrollY },
         selectionRect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
         devicePixelRatio: window.devicePixelRatio || 1,
       };

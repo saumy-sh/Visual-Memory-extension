@@ -7,8 +7,15 @@ export function ExpandedPreview() {
   if (!screenshot) return null;
 
   const handleNavigate = () => {
-    window.scrollTo({ top: screenshot.capturePosition.scrollY, left: screenshot.capturePosition.scrollX, behavior: "smooth" });
     setExpandedId(null);
+    // Small delay to let the modal close first
+    setTimeout(() => {
+      window.scrollTo({
+        top: screenshot.capturePosition.scrollY + screenshot.selectionRect.y,
+        left: screenshot.capturePosition.scrollX + screenshot.selectionRect.x,
+        behavior: "smooth",
+      });
+    }, 150);
   };
 
   const btnStyle = (bg: string): React.CSSProperties => ({

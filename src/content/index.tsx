@@ -2,6 +2,9 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { Overlay } from "./overlay/Overlay";
 
+
+console.log("[VisualMemory] Content script loaded!");
+
 function mountExtension() {
   if (document.getElementById("visual-memory-root")) return;
 

@@ -12,15 +12,28 @@ export async function captureAndCrop(cropRect: CropRect): Promise<string> {
 
 function requestViewportCapture(): Promise<string> {
   return new Promise((resolve, reject) => {
-    chrome.runtime.sendMessage(
-      { type: "CAPTURE_VISIBLE_TAB", tabId: 0 },
-      (response: { dataUrl?: string; error?: string }) => {
-        if (chrome.runtime.lastError) return reject(chrome.runtime.lastError.message);
-        if (response?.error) return reject(response.error);
-        if (!response?.dataUrl) return reject("No dataUrl");
-        resolve(response.dataUrl);
-      }
-    );
+    try {
+      chrome.runtime.sendMessage(
+        { type: "CAPTURE_VISIBLE_TAB", tabId: 0 },
+        (response: { dataUrl?: string; error?: string }) => {
+          if (chrome.runtime.lastError) {
+            reject(new Error(chrome.runtime.lastError.message));
+            return;
+          }
+          if (response?.error) {
+            reject(new Error(response.error));
+            return;
+          }
+          if (!response?.dataUrl) {
+            reject(new Error("No dataUrl in response"));
+            return;
+          }
+          resolve(response.dataUrl);
+        }
+      );
+    } catch (err) {
+      reject(err);
+    }
   });
 }
 
@@ -33,11 +46,17 @@ function cropImage(dataUrl: string, rect: CropRect): Promise<string> {
       canvas.width = rect.width;
       canvas.height = rect.height;
       const ctx = canvas.getContext("2d");
-      if (!ctx) return reject("No canvas context");
-      ctx.drawImage(img, rect.x * dpr, rect.y * dpr, rect.width * dpr, rect.height * dpr, 0, 0, rect.width, rect.height);
+      if (!ctx) return reject(new Error("No canvas context"));
+      ctx.drawImage(
+        img,
+        rect.x * dpr, rect.y * dpr,
+        rect.width * dpr, rect.height * dpr,
+        0, 0,
+        rect.width, rect.height
+      );
       resolve(canvas.toDataURL("image/jpeg", 0.85));
     };
-    img.onerror = () => reject("Image load failed");
+    img.onerror = () => reject(new Error("Image load failed"));
     img.src = dataUrl;
   });
 }

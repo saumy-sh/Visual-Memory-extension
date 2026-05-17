@@ -1,22 +1,42 @@
 import type { ScreenshotItem } from "../../shared/types";
 
-export async function loadScreenshotsForPage(): Promise<ScreenshotItem[]> {
-  return new Promise((resolve) => {
-    chrome.runtime.sendMessage(
-      { type: "GET_SCREENSHOTS", url: window.location.href },
-      (res) => resolve(res?.screenshots ?? [])
-    );
+function sendMessage(message: object): Promise<unknown> {
+  return new Promise((resolve, reject) => {
+    try {
+      chrome.runtime.sendMessage(message, (response) => {
+        if (chrome.runtime.lastError) {
+          reject(chrome.runtime.lastError.message);
+          return;
+        }
+        resolve(response);
+      });
+    } catch (err) {
+      reject(err);
+    }
   });
+}
+
+export async function loadScreenshotsForPage(): Promise<ScreenshotItem[]> {
+  try {
+    const res = await sendMessage({ type: "GET_SCREENSHOTS", url: window.location.href }) as { screenshots?: ScreenshotItem[] };
+    return res?.screenshots ?? [];
+  } catch {
+    return [];
+  }
 }
 
 export async function persistScreenshot(item: ScreenshotItem): Promise<void> {
-  return new Promise((resolve) => {
-    chrome.runtime.sendMessage({ type: "SAVE_SCREENSHOT", screenshot: item }, () => resolve());
-  });
+  try {
+    await sendMessage({ type: "SAVE_SCREENSHOT", screenshot: item });
+  } catch (err) {
+    console.warn("[VisualMemory] Could not persist screenshot:", err);
+  }
 }
 
 export async function removeScreenshot(id: string): Promise<void> {
-  return new Promise((resolve) => {
-    chrome.runtime.sendMessage({ type: "DELETE_SCREENSHOT", id, url: window.location.href }, () => resolve());
-  });
+  try {
+    await sendMessage({ type: "DELETE_SCREENSHOT", id, url: window.location.href });
+  } catch (err) {
+    console.warn("[VisualMemory] Could not remove screenshot:", err);
+  }
 }
