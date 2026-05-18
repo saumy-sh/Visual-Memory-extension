@@ -36,19 +36,23 @@ export function Dock() {
   const [isCarouselOpen, setIsCarouselOpen] = useState(false);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [scrollOffset, setScrollOffset] = useState(0);
+  const [isDragging, setIsDragging] = useState(false);
+
+  // ── FIX 2: use a ref for live position during drag, state only for render ──
+  const positionRef = useRef<{ x: number; y: number }>(
+    loadPosition() ?? { x: window.innerWidth - 80, y: window.innerHeight / 2 - 40 }
+  );
+  const [position, setPosition] = useState<{ x: number; y: number }>(() => {
+    const saved = loadPosition();
+    return saved ?? { x: window.innerWidth - 80, y: window.innerHeight / 2 - 40 };
+  });
+
   const dragging = useRef(false);
   const dragOffset = useRef({ x: 0, y: 0 });
   const hasDragged = useRef(false);
   const dockRef = useRef<HTMLDivElement>(null);
   const carouselRef = useRef<HTMLDivElement>(null);
 
-  const [position, setPosition] = useState<{ x: number; y: number }>(() => {
-    const saved = loadPosition();
-    if (saved) return saved;
-    return { x: window.innerWidth - 80, y: window.innerHeight / 2 - 40 };
-  });
-
-  // Clamp scrollOffset when screenshots change
   useEffect(() => {
     const maxOffset = Math.max(0, screenshots.length - MAX_VISIBLE);
     setScrollOffset(s => Math.min(s, maxOffset));
@@ -56,16 +60,17 @@ export function Dock() {
 
   useEffect(() => {
     const onResize = () => {
-      setPosition(p => ({
-        x: Math.min(p.x, window.innerWidth - 64),
-        y: Math.min(p.y, window.innerHeight - 64),
-      }));
+      setPosition(p => {
+        const np = { x: Math.min(p.x, window.innerWidth - 64), y: Math.min(p.y, window.innerHeight - 64) };
+        positionRef.current = np;
+        return np;
+      });
     };
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
   }, []);
 
-  // Native wheel listener on carousel — prevents page scroll
+  // Carousel wheel — native listener so page doesn't scroll
   useEffect(() => {
     const el = carouselRef.current;
     if (!el) return;
@@ -98,34 +103,43 @@ export function Dock() {
     e.stopPropagation();
     dragging.current = true;
     hasDragged.current = false;
+
+    // ── FIX 2: read from ref, not stale state closure ──
     dragOffset.current = {
-      x: e.clientX - position.x,
-      y: e.clientY - position.y,
+      x: e.clientX - positionRef.current.x,
+      y: e.clientY - positionRef.current.y,
     };
 
     const onMouseMove = (ev: MouseEvent) => {
       if (!dragging.current) return;
       hasDragged.current = true;
-      setPosition({
+      setIsDragging(true);
+      const newPos = {
         x: Math.max(0, Math.min(window.innerWidth - 64, ev.clientX - dragOffset.current.x)),
         y: Math.max(0, Math.min(window.innerHeight - 64, ev.clientY - dragOffset.current.y)),
-      });
+      };
+      positionRef.current = newPos; // update ref immediately
+      setPosition(newPos);          // update state for render
     };
 
     const onMouseUp = () => {
+      if (!dragging.current) return;
       dragging.current = false;
-      setPosition(p => { savePosition(p); return p; });
+      setIsDragging(false);
+      savePosition(positionRef.current);
       window.removeEventListener("mousemove", onMouseMove);
       window.removeEventListener("mouseup", onMouseUp);
+      // only block the dock toggle click, reset immediately after it fires
+      setTimeout(() => {
+        hasDragged.current = false;
+      }, 50); // short enough to not block carousel cards, long enough to block dock onClick
     };
 
     window.addEventListener("mousemove", onMouseMove);
     window.addEventListener("mouseup", onMouseUp);
-  }, [position]);
+  }, []); // ── no position dependency — reads from ref instead ──
 
-  const openCarousel = useCallback(() => {
-    setIsCarouselOpen(true);
-  }, []);
+  const openCarousel = useCallback(() => setIsCarouselOpen(true), []);
 
   const toggleCarousel = useCallback(() => {
     if (hasDragged.current) return;
@@ -140,20 +154,29 @@ export function Dock() {
   const handleDelete = async (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
     e.preventDefault();
+    // ── remove ss without touching carousel state ──
     await removeScreenshot(id);
     removeFromStore(id);
+    // carousel stays open — isCarouselOpen is untouched
   };
 
   const handleCardClick = useCallback((id: string) => {
-    if (!hasDragged.current) setExpandedId(id);
+    setExpandedId(id);
   }, [setExpandedId]);
 
-  // Visible slice — always MAX_VISIBLE or fewer
   const visibleScreenshots = screenshots.slice(scrollOffset, scrollOffset + MAX_VISIBLE);
   const visibleCount = visibleScreenshots.length;
   const carouselHeight = visibleCount * (CARD_H + GAP) - GAP;
   const canScrollUp = scrollOffset > 0;
   const canScrollDown = scrollOffset < screenshots.length - MAX_VISIBLE;
+
+  // ── FIX 3: dock body height for carousel centering ──
+  const DOCK_BTN_H = 40;
+  const DOCK_STACK_H = screenshots.length > 0 ? 34 : 0;
+  const DOCK_GAP = 6;
+  const DOCK_PAD = 12;
+  const dockHeight = DOCK_BTN_H + (DOCK_STACK_H > 0 ? DOCK_STACK_H + DOCK_GAP : 0) + DOCK_PAD;
+  const dockCenterY = dockHeight / 2;
 
   return (
     <div
@@ -165,163 +188,51 @@ export function Dock() {
         zIndex: 2147483647,
         pointerEvents: "auto",
         userSelect: "none",
-        display: "flex",
-        alignItems: "center",
-        flexDirection: "row-reverse",
       }}
     >
-      {/* Dock body */}
-      <div
-        onMouseDown={handleMouseDown}
-        onClick={toggleCarousel}
-        style={{
-          display: "flex",
-          flexDirection: "column",
-          alignItems: "center",
-          gap: "6px",
-          cursor: "pointer",
-          padding: "6px",
-          borderRadius: "16px",
-          background: "rgba(15,15,20,0.65)",
-          backdropFilter: "blur(12px)",
-          border: "1px solid rgba(255,255,255,0.09)",
-          boxShadow: "0 4px 24px rgba(0,0,0,0.45)",
-          flexShrink: 0,
-        }}
-      >
-        {/* Scissor button */}
-        <motion.button
-          whileHover={{ scale: 1.08 }}
-          whileTap={{ scale: 0.94 }}
-          onMouseDown={(e) => e.stopPropagation()}
-          onClick={(e) => {
-            e.stopPropagation();
-            if (!hasDragged.current) setCapturing(true);
-          }}
-          title="Capture region"
-          style={{
-            width: "40px",
-            height: "40px",
-            borderRadius: "50%",
-            background: "linear-gradient(135deg, #6366f1, #8b5cf6)",
-            border: "none",
-            cursor: "pointer",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            boxShadow: "0 4px 16px rgba(99,102,241,0.5)",
-            fontSize: "18px",
-            flexShrink: 0,
-            pointerEvents: "auto",
-          }}
-        >
-          ✂️
-        </motion.button>
-
-        {/* Card stack */}
-        {screenshots.length > 0 && (
-          <div style={{ position: "relative", width: "40px", height: "34px", flexShrink: 0 }}>
-            {screenshots.slice(-3).map((ss, i, arr) => {
-              const depth = arr.length - 1 - i;
-              return (
-                <img
-                  key={ss.id}
-                  src={ss.image}
-                  alt=""
-                  draggable={false}
-                  style={{
-                    position: "absolute",
-                    width: "40px",
-                    height: "30px",
-                    objectFit: "cover",
-                    borderRadius: "5px",
-                    border: "1.5px solid rgba(255,255,255,0.2)",
-                    boxShadow: "0 2px 6px rgba(0,0,0,0.4)",
-                    top: `${depth * -2}px`,
-                    left: `${depth * 2}px`,
-                    zIndex: i,
-                    transform: `rotate(${(depth - 1) * 4}deg)`,
-                    pointerEvents: "none",
-                  }}
-                />
-              );
-            })}
-          </div>
-        )}
-      </div>
-
-      {/* Carousel */}
+      {/* ── FIX 3: carousel is absolute, positioned relative to dock ── */}
       <AnimatePresence>
         {isCarouselOpen && screenshots.length > 0 && (
           <motion.div
             ref={carouselRef}
-            initial={{ opacity: 0, x: 16 }}
+            initial={{ opacity: 0, x: 8 }}
             animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, x: 16 }}
+            exit={{ opacity: 0, x: 8 }}
             transition={{ duration: 0.18, ease: "easeOut" }}
             style={{
-              position: "relative",
+              position: "absolute",
+              // left of the dock
+              right: "calc(100% + 10px)",
+              // vertically centered on dock center
+              top: dockCenterY - (carouselHeight / 2 + CARD_H / 2),
               width: `${CARD_W + 60}px`,
               height: `${carouselHeight + CARD_H + 40}px`,
-              flexShrink: 0,
               pointerEvents: "auto",
               display: "flex",
               alignItems: "center",
               justifyContent: "flex-end",
             }}
           >
-            {/* Scroll up indicator */}
+            {/* Scroll indicators */}
             <AnimatePresence>
               {canScrollUp && (
-                <motion.div
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  exit={{ opacity: 0 }}
-                  style={{
-                    position: "absolute",
-                    top: "2px",
-                    right: CARD_W / 2 - 8,
-                    color: "rgba(255,255,255,0.6)",
-                    fontSize: "11px",
-                    pointerEvents: "none",
-                    zIndex: 20,
-                  }}
-                >
+                <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                  style={{ position: "absolute", top: "2px", right: CARD_W / 2 - 8, color: "rgba(255,255,255,0.6)", fontSize: "11px", pointerEvents: "none", zIndex: 20 }}>
                   ▲
                 </motion.div>
               )}
             </AnimatePresence>
-
-            {/* Scroll down indicator */}
             <AnimatePresence>
               {canScrollDown && (
-                <motion.div
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  exit={{ opacity: 0 }}
-                  style={{
-                    position: "absolute",
-                    bottom: "2px",
-                    right: CARD_W / 2 - 8,
-                    color: "rgba(255,255,255,0.6)",
-                    fontSize: "11px",
-                    pointerEvents: "none",
-                    zIndex: 20,
-                  }}
-                >
+                <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                  style={{ position: "absolute", bottom: "2px", right: CARD_W / 2 - 8, color: "rgba(255,255,255,0.6)", fontSize: "11px", pointerEvents: "none", zIndex: 20 }}>
                   ▼
                 </motion.div>
               )}
             </AnimatePresence>
 
             {/* Cards container */}
-            <div
-              style={{
-                position: "relative",
-                width: `${CARD_W + 40}px`,
-                height: `${carouselHeight}px`,
-              }}
-            >
+            <div style={{ position: "relative", width: `${CARD_W + 40}px`, height: `${carouselHeight}px` }}>
               {visibleScreenshots.map((screenshot, index) => {
                 const { translateY, bowX, rotate } = getCardTransform(index, visibleCount);
                 const isHovered = hoveredId === screenshot.id;
@@ -353,21 +264,9 @@ export function Dock() {
                       zIndex: isHovered ? 10 : 1,
                     }}
                   >
-                    <img
-                      src={screenshot.image}
-                      alt="Captured region"
-                      draggable={false}
-                      style={{
-                        width: "100%",
-                        height: "100%",
-                        objectFit: "cover",
-                        borderRadius: "8px",
-                        display: "block",
-                        border: "2px solid rgba(255,255,255,0.15)",
-                      }}
-                    />
+                    <img src={screenshot.image} alt="Captured region" draggable={false}
+                      style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: "8px", display: "block", border: "2px solid rgba(255,255,255,0.15)" }} />
 
-                    {/* Delete button on hover */}
                     <AnimatePresence>
                       {isHovered && (
                         <motion.button
@@ -376,28 +275,8 @@ export function Dock() {
                           exit={{ opacity: 0, scale: 0.6 }}
                           transition={{ duration: 0.1 }}
                           onClick={(e) => handleDelete(e, screenshot.id)}
-                          style={{
-                            position: "absolute",
-                            top: "-8px",
-                            right: "-8px",
-                            width: "20px",
-                            height: "20px",
-                            borderRadius: "50%",
-                            background: "#ef4444",
-                            border: "2px solid rgba(10,10,15,0.95)",
-                            cursor: "pointer",
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "center",
-                            fontSize: "12px",
-                            fontWeight: "bold",
-                            color: "white",
-                            zIndex: 20,
-                            pointerEvents: "auto",
-                          }}
-                        >
-                          ×
-                        </motion.button>
+                          style={{ position: "absolute", top: "-8px", right: "-8px", width: "20px", height: "20px", borderRadius: "50%", background: "#ef4444", border: "2px solid rgba(10,10,15,0.95)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "12px", fontWeight: "bold", color: "white", zIndex: 20, pointerEvents: "auto" }}
+                        >×</motion.button>
                       )}
                     </AnimatePresence>
                   </motion.div>
@@ -407,6 +286,108 @@ export function Dock() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* Dock body */}
+      <div
+        onClick={toggleCarousel}
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          gap: `${DOCK_GAP}px`,
+          cursor: "pointer",
+          padding: "6px",
+          paddingTop: "22px", // extra top space for the drag handle
+          borderRadius: "16px",
+          background: "rgba(15,15,20,0.65)",
+          backdropFilter: "blur(12px)",
+          border: "1px solid rgba(255,255,255,0.09)",
+          boxShadow: "0 4px 24px rgba(0,0,0,0.45)",
+          flexShrink: 0,
+          position: "relative",
+        }}
+      >
+        {/* Drag handle — top of dock */}
+        <div
+          onMouseDown={handleMouseDown}
+          title="Drag to move"
+          style={{
+            position: "absolute",
+            top: 5,
+            left: "50%",
+            transform: "translateX(-50%)",
+            width: 28,
+            height: 12,
+            cursor: isDragging ? "grabbing" : "grab",
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 3,
+            padding: "2px 4px",
+            borderRadius: 4,
+            opacity: 0.4,
+            transition: "opacity 0.2s",
+            zIndex: 10,
+          }}
+          onMouseEnter={e => (e.currentTarget.style.opacity = "0.9")}
+          onMouseLeave={e => (e.currentTarget.style.opacity = "0.4")}
+        >
+          {/* Two dotted rows — classic drag handle icon */}
+          {[0, 1].map(row => (
+            <div key={row} style={{ display: "flex", gap: 3 }}>
+              {[0, 1, 2].map(dot => (
+                <div key={dot} style={{
+                  width: 3, height: 3, borderRadius: "50%",
+                  background: "rgba(255,255,255,0.9)",
+                }} />
+              ))}
+            </div>
+          ))}
+        </div>
+
+        {/* Scissor button */}
+        <motion.button
+          whileHover={{ scale: 1.08 }}
+          whileTap={{ scale: 0.94 }}
+          onMouseDown={(e) => e.stopPropagation()}
+          onClick={(e) => {
+            e.stopPropagation();
+            setCapturing(true); // no hasDragged check needed anymore
+          }}
+          title="Capture region"
+          style={{
+            width: "40px", height: "40px", borderRadius: "50%",
+            background: "linear-gradient(135deg, #6366f1, #8b5cf6)",
+            border: "none", cursor: "pointer",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            boxShadow: "0 4px 16px rgba(99,102,241,0.5)",
+            fontSize: "18px", flexShrink: 0, pointerEvents: "auto",
+          }}
+        >✂️</motion.button>
+
+        {/* Card stack */}
+        {screenshots.length > 0 && (
+          <div style={{ position: "relative", width: "40px", height: "34px", flexShrink: 0 }}>
+            {screenshots.slice(-3).map((ss, i, arr) => {
+              const depth = arr.length - 1 - i;
+              return (
+                <img key={ss.id} src={ss.image} alt="" draggable={false}
+                  style={{
+                    position: "absolute", width: "40px", height: "30px",
+                    objectFit: "cover", borderRadius: "5px",
+                    border: "1.5px solid rgba(255,255,255,0.2)",
+                    boxShadow: "0 2px 6px rgba(0,0,0,0.4)",
+                    top: `${depth * -2}px`, left: `${depth * 2}px`,
+                    zIndex: i, transform: `rotate(${(depth - 1) * 4}deg)`,
+                    pointerEvents: "none",
+                  }}
+                />
+              );
+            })}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

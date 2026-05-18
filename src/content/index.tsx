@@ -1,4 +1,4 @@
-import React, { StrictMode } from "react";
+import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { Overlay } from "./overlay/Overlay";
 
@@ -16,10 +16,12 @@ function mountExtension() {
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     :host { all: initial; font-family: system-ui, sans-serif; font-size: 14px; color: white; }
     @keyframes vm-spin { to { transform: rotate(360deg); } }
+    @keyframes float { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-14px)} }
   `;
   shadowRoot.appendChild(style);
 
   const container = document.createElement("div");
+  // ── KEY: pointer-events none on container, components opt-in individually ──
   container.style.cssText = "pointer-events: none; position: fixed; inset: 0;";
   shadowRoot.appendChild(container);
 
