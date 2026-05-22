@@ -3,7 +3,7 @@
   "name": "Visual Memory",
   "version": "0.1.0",
   "description": "Capture sections of webpages as floating screenshots.",
-  "permissions": ["activeTab", "storage", "scripting", "tabs"],
+  "permissions": ["activeTab", "storage", "scripting"],
   "host_permissions": ["<all_urls>"],
   "action": {
     "default_popup": "popup/index.html",
